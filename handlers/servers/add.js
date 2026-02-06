@@ -161,6 +161,24 @@ export async function handleServersAddMessage({ token, chatId, user, text, db, s
 	}
 
 	try {
+		// Ensure servers table exists
+		await db
+			.prepare(`
+				CREATE TABLE IF NOT EXISTS servers (
+					id TEXT PRIMARY KEY DEFAULT (lower(hex(randomblob(16)))),
+					name TEXT NOT NULL UNIQUE,
+					host TEXT NOT NULL,
+					description TEXT,
+					ssh_user TEXT NOT NULL,
+					ssh_password TEXT,
+					ssh_port INTEGER DEFAULT 22,
+					status TEXT DEFAULT 'pending',
+					last_seen_at TEXT,
+					created_at TEXT DEFAULT (datetime('now'))
+				)
+			`)
+			.run();
+
 		await db
 			.prepare(
 				'INSERT INTO servers (name, host, description, ssh_user, ssh_password, ssh_port) VALUES (?, ?, ?, ?, ?, ?)'

@@ -103,8 +103,8 @@ export default {
 
 				switch (true) {
 					case data === INLINE_KEYS.SERVERS: {
-						const { text, replyMarkup, parse_mode } = await handleServersList({ db: env.DB, sendMessage, token: BOT_TOKEN, chatId });
-						await sendMessage(BOT_TOKEN, chatId, text, replyMarkup, parse_mode);
+						const { text, replyMarkup } = await handleServers();
+						await sendMessage(BOT_TOKEN, chatId, text, replyMarkup);
 						break;
 					}
 					case data === INLINE_KEYS.SERVERS_LIST: {
@@ -275,3 +275,4 @@ async function upsertUser(db, user) {
 		.bind(telegramId, username, firstName, now, now)
 		.run();
 }
+
