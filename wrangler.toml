@@ -1,0 +1,6 @@
+name = "serverhealth"
+main = "index.js"
+compatibility_date = "2026-02-06"
+
+# Add your bot token via:
+# wrangler secret put BOT_TOKEN
