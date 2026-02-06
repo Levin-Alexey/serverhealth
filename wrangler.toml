@@ -1,14 +1,16 @@
 name = "serverhealth"
 main = "index.js"
-compatibility_date = "2026-02-06"
+compatibility_date = "2024-12-10"
+account_id = "fafbf788fa4959c11d7e1da97fe345fe"
 
-kv_namespaces = [
-	{ binding = "KV", id = "35fdd157de9c4acba31bb80f853530cf" }
-]
+[[kv_namespaces]]
+binding = "KV"
+id = "35fdd157de9c4acba31bb80f853530cf"
 
-d1_databases = [
-  { binding = "DB", database_name = "serverhealth", database_id = "8698da9b-483a-4213-b6ba-5fc4454b8441" }
-]
+[[d1_databases]]
+binding = "DB"
+database_name = "serverhealth"
+database_id = "8698da9b-483a-4213-b6ba-5fc4454b8441"
 
 # Add your bot token via:
 # wrangler secret put BOT_TOKEN
