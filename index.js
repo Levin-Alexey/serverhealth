@@ -1,278 +1,283 @@
-// Telegram bot on Cloudflare Worker: /start -> "Привет, я бот"
-import handleServers from './handlers/servers.js';
-import handleServersList from './handlers/servers/list.js';
-import handleServersAdd, {
-	cancelServerAddFlow,
-	handleServersAddMessage,
-	isCancelText
-} from './handlers/servers/add.js';
-import handleServersStatus, { handleServersStatusCheck } from './handlers/servers/status.js';
-import handleServersDelete, {
-	handleServersDeleteConfirm,
-	handleServersDeleteExecute
-} from './handlers/servers/delete.js';
-import handleMetrics from './handlers/metrics.js';
-import handleAlerts from './handlers/alerts.js';
-import handleAnalytics from './handlers/analytics.js';
-import handleSettings from './handlers/settings.js';
-import handleHelp from './handlers/help.js';
-
-const TELEGRAM_API = 'https://api.telegram.org/bot';
-const ALLOWED_USER_ID = 525944420;
-
-const INLINE_KEYS = {
-	SERVERS: 'servers',
-	SERVERS_LIST: 'servers_list',
-	SERVERS_ADD: 'servers_add',
-	SERVERS_STATUS: 'servers_status',
-	SERVERS_DELETE: 'servers_delete',
-	SERVERS_ADD_CANCEL: 'servers_add_cancel',
-	METRICS: 'metrics',
-	ALERTS: 'alerts',
-	ANALYTICS: 'analytics',
-	SETTINGS: 'settings',
-	HELP: 'help',
-	BACK_TO_MENU: 'back_to_menu'
-};
+import { handleTelegram } from './telegram.js';
+import { handleServersList } from './api/servers.js';
+import { handleMetrics } from './api/metrics.js';
 
 export default {
-	async fetch(request, env) {
-		const BOT_TOKEN = env.BOT_TOKEN;
+  async fetch(request, env) {
+    const url = new URL(request.url);
 
-		if (request.method !== 'POST') {
-			return new Response('Bot is running', { status: 200 });
-		}
+    if (url.pathname === '/webhook') {
+      return handleTelegram(request, env);
+    }
 
-		try {
-			const update = await request.json();
+    if (url.pathname === '/api/servers/list') {
+      return handleServersList(env);
+    }
 
-			if (update?.message?.text === '/start') {
-				const chatId = update.message.chat.id;
-				const user = update.message.from;
+    if (url.pathname === '/api/metrics') {
+      return handleMetrics(request, env);
+    }
 
-				if (!isAllowedUser(user)) {
-					await sendMessage(BOT_TOKEN, chatId, 'Доступ закрыт');
-					return new Response('OK', { status: 200 });
-				}
+    // === ГРАФИК CPU ===
+    if (url.pathname === '/chart/cpu') {
+      const serverId = url.searchParams.get('server_id');
+      
+      const metrics = await env.DB.prepare(`
+        SELECT cpu_usage, created_at 
+        FROM server_metrics 
+        WHERE server_id = ? 
+        ORDER BY created_at DESC 
+        LIMIT 48
+      `).bind(serverId).all();
+      
+      const server = await env.DB.prepare(
+        'SELECT name FROM servers WHERE id = ?'
+      ).bind(serverId).first();
+      
+      const timestamps = metrics.results.map(m => m.created_at).reverse();
+      const values = metrics.results.map(m => m.cpu_usage).reverse();
+      
+      const hfResponse = await fetch('https://levinaleksey-server-monitoring-api.hf.space/chart/cpu', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          server_name: server?.name || 'Server',
+          timestamps: timestamps,
+          values: values
+        })
+      });
+      
+      const html = await hfResponse.text();
+      return new Response(html, { headers: { 'Content-Type': 'text/html' }});
+    }
 
-				await upsertUser(env.DB, user);
-				await sendMainMenu(BOT_TOKEN, chatId);
-			}
+    // === ГРАФИК RAM ===
+    if (url.pathname === '/chart/ram') {
+      const serverId = url.searchParams.get('server_id');
+      
+      const metrics = await env.DB.prepare(`
+        SELECT ram_usage, created_at 
+        FROM server_metrics 
+        WHERE server_id = ? 
+        ORDER BY created_at DESC 
+        LIMIT 48
+      `).bind(serverId).all();
+      
+      const server = await env.DB.prepare(
+        'SELECT name FROM servers WHERE id = ?'
+      ).bind(serverId).first();
+      
+      const timestamps = metrics.results.map(m => m.created_at).reverse();
+      const values = metrics.results.map(m => m.ram_usage).reverse();
+      
+      const hfResponse = await fetch('https://levinaleksey-server-monitoring-api.hf.space/chart/ram', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          server_name: server?.name || 'Server',
+          timestamps: timestamps,
+          values: values
+        })
+      });
+      
+      const html = await hfResponse.text();
+      return new Response(html, { headers: { 'Content-Type': 'text/html' }});
+    }
 
-			if (update?.message?.text && update.message.text !== '/start') {
-				const chatId = update.message.chat.id;
-				const user = update.message.from;
-				const text = update.message.text.trim();
+    // === ГРАФИК DISK ===
+    if (url.pathname === '/chart/disk') {
+      const serverId = url.searchParams.get('server_id');
+      
+      const metrics = await env.DB.prepare(`
+        SELECT disk_usage, created_at 
+        FROM server_metrics 
+        WHERE server_id = ? 
+        ORDER BY created_at DESC 
+        LIMIT 48
+      `).bind(serverId).all();
+      
+      const server = await env.DB.prepare(
+        'SELECT name FROM servers WHERE id = ?'
+      ).bind(serverId).first();
+      
+      const timestamps = metrics.results.map(m => m.created_at).reverse();
+      const values = metrics.results.map(m => m.disk_usage).reverse();
+      
+      const hfResponse = await fetch('https://levinaleksey-server-monitoring-api.hf.space/chart/disk', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          server_name: server?.name || 'Server',
+          timestamps: timestamps,
+          values: values
+        })
+      });
+      
+      const html = await hfResponse.text();
+      return new Response(html, { headers: { 'Content-Type': 'text/html' }});
+    }
 
-				if (!isAllowedUser(user)) {
-					await sendMessage(BOT_TOKEN, chatId, 'Доступ закрыт');
-					return new Response('OK', { status: 200 });
-				}
+    // === ГРАФИК NETWORK ===
+    if (url.pathname === '/chart/network') {
+      const serverId = url.searchParams.get('server_id');
+      
+      const metrics = await env.DB.prepare(`
+        SELECT network_in_bytes, network_out_bytes, created_at 
+        FROM server_metrics 
+        WHERE server_id = ? 
+        ORDER BY created_at DESC 
+        LIMIT 48
+      `).bind(serverId).all();
+      
+      const server = await env.DB.prepare(
+        'SELECT name FROM servers WHERE id = ?'
+      ).bind(serverId).first();
+      
+      const timestamps = metrics.results.map(m => m.created_at).reverse();
+      const netIn = metrics.results.map(m => m.network_in_bytes).reverse();
+      const netOut = metrics.results.map(m => m.network_out_bytes).reverse();
+      
+      const hfResponse = await fetch('https://levinaleksey-server-monitoring-api.hf.space/chart/network', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          server_name: server?.name || 'Server',
+          timestamps: timestamps,
+          in: netIn,
+          out: netOut
+        })
+      });
+      
+      const html = await hfResponse.text();
+      return new Response(html, { headers: { 'Content-Type': 'text/html' }});
+    }
 
-				if (isCancelText(text)) {
-					await cancelServerAddFlow(env.DB, user.id);
-					const { replyMarkup } = await handleServers();
-					await sendMessage(BOT_TOKEN, chatId, 'Добавление сервера отменено.', replyMarkup);
-					return new Response('OK', { status: 200 });
-				}
+    // === ГРАФИК OVERVIEW ===
+    if (url.pathname === '/chart/overview') {
+      const serverId = url.searchParams.get('server_id');
+      
+      const metrics = await env.DB.prepare(`
+        SELECT cpu_usage, ram_usage, disk_usage, created_at 
+        FROM server_metrics 
+        WHERE server_id = ? 
+        ORDER BY created_at DESC 
+        LIMIT 48
+      `).bind(serverId).all();
+      
+      const server = await env.DB.prepare(
+        'SELECT name FROM servers WHERE id = ?'
+      ).bind(serverId).first();
+      
+      const timestamps = metrics.results.map(m => m.created_at).reverse();
+      const cpu = metrics.results.map(m => m.cpu_usage).reverse();
+      const ram = metrics.results.map(m => m.ram_usage).reverse();
+      const disk = metrics.results.map(m => m.disk_usage).reverse();
+      
+      const hfResponse = await fetch('https://levinaleksey-server-monitoring-api.hf.space/chart/overview', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          server_name: server?.name || 'Server',
+          timestamps: timestamps,
+          cpu: cpu,
+          ram: ram,
+          disk: disk
+        })
+      });
+      
+      const html = await hfResponse.text();
+      return new Response(html, { headers: { 'Content-Type': 'text/html' }});
+    }
 
-				await handleServersAddMessage({
-					token: BOT_TOKEN,
-					chatId,
-					user,
-					text,
-					db: env.DB,
-					sendMessage,
-					onComplete: async () => {
-						const { replyMarkup } = await handleServers();
-						await sendMessage(BOT_TOKEN, chatId, 'Возврат в меню серверов.', replyMarkup);
-					}
-				});
-				return new Response('OK', { status: 200 });
-			}
+    // === ПРЕДИКЦИЯ ДИСКА ===
+    if (url.pathname === '/predict/disk') {
+      const serverId = url.searchParams.get('server_id');
+      
+      const metrics = await env.DB.prepare(`
+        SELECT disk_usage, created_at 
+        FROM server_metrics 
+        WHERE server_id = ? 
+        ORDER BY created_at DESC 
+        LIMIT 100
+      `).bind(serverId).all();
+      
+      const values = metrics.results.map(m => m.disk_usage).reverse();
+      
+      const hfResponse = await fetch('https://levinaleksey-server-monitoring-api.hf.space/predict/disk', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ values: values, total_gb: 100 })
+      });
+      
+      const result = await hfResponse.json();
+      return new Response(JSON.stringify(result), { 
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
 
-			if (update?.callback_query) {
-				const chatId = update.callback_query.message.chat.id;
-				const data = update.callback_query.data;
-				const user = update.callback_query.from;
+    // === ПРЕДИКЦИЯ RAM ===
+    if (url.pathname === '/predict/ram') {
+      const serverId = url.searchParams.get('server_id');
+      
+      const metrics = await env.DB.prepare(`
+        SELECT ram_usage, created_at 
+        FROM server_metrics 
+        WHERE server_id = ? 
+        ORDER BY created_at DESC 
+        LIMIT 100
+      `).bind(serverId).all();
+      
+      const values = metrics.results.map(m => m.ram_usage).reverse();
+      
+      const hfResponse = await fetch('https://levinaleksey-server-monitoring-api.hf.space/predict/ram', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ values: values })
+      });
+      
+      const result = await hfResponse.json();
+      return new Response(JSON.stringify(result), { 
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
 
-				if (!isAllowedUser(user)) {
-					await sendMessage(BOT_TOKEN, chatId, 'Доступ закрыт');
-					return new Response('OK', { status: 200 });
-				}
+    // === ДЕТЕКЦИЯ АНОМАЛИЙ ===
+    if (url.pathname === '/anomaly/detect') {
+      const serverId = url.searchParams.get('server_id');
+      
+      // Текущие метрики
+      const current = await env.DB.prepare(`
+        SELECT cpu_usage, ram_usage, disk_usage 
+        FROM server_metrics 
+        WHERE server_id = ? 
+        ORDER BY created_at DESC 
+        LIMIT 1
+      `).bind(serverId).first();
+      
+      // История за последние 100 записей
+      const history = await env.DB.prepare(`
+        SELECT cpu_usage, ram_usage, disk_usage 
+        FROM server_metrics 
+        WHERE server_id = ? 
+        ORDER BY created_at DESC 
+        LIMIT 100
+      `).bind(serverId).all();
+      
+      const hfResponse = await fetch('https://levinaleksey-server-monitoring-api.hf.space/anomaly/detect', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          current: current,
+          history: history.results 
+        })
+      });
+      
+      const result = await hfResponse.json();
+      return new Response(JSON.stringify(result), { 
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
 
-				switch (true) {
-					case data === INLINE_KEYS.SERVERS: {
-						const { text, replyMarkup } = await handleServers();
-						await sendMessage(BOT_TOKEN, chatId, text, replyMarkup);
-						break;
-					}
-					case data === INLINE_KEYS.SERVERS_LIST: {
-						const { text, replyMarkup, parse_mode } = await handleServersList({ db: env.DB, sendMessage, token: BOT_TOKEN, chatId });
-						await sendMessage(BOT_TOKEN, chatId, text, replyMarkup, parse_mode);
-						break;
-					}
-					case data === INLINE_KEYS.SERVERS_ADD: {
-						await handleServersAdd({
-							token: BOT_TOKEN,
-							chatId,
-							user,
-							db: env.DB,
-							sendMessage
-						});
-						break;
-					}
-					case data === INLINE_KEYS.SERVERS_STATUS: {
-						const { text, replyMarkup, parse_mode } = await handleServersStatus({ db: env.DB });
-						await sendMessage(BOT_TOKEN, chatId, text, replyMarkup, parse_mode);
-						break;
-					}
-					case data.startsWith('servers_status_check_'): {
-						const serverId = data.replace('servers_status_check_', '');
-						const response = await handleServersStatusCheck({ db: env.DB, serverId });
-						await sendMessage(BOT_TOKEN, chatId, response.text, response.replyMarkup, response.parse_mode);
-						break;
-					}
-					case data === INLINE_KEYS.SERVERS_DELETE: {
-						const { text, replyMarkup, parse_mode } = await handleServersDelete({ db: env.DB });
-						await sendMessage(BOT_TOKEN, chatId, text, replyMarkup, parse_mode);
-						break;
-					}
-					case data.startsWith('servers_delete_confirm_'): {
-						const serverId = data.replace('servers_delete_confirm_', '');
-						const response = await handleServersDeleteConfirm({ db: env.DB, serverId });
-						if (response) {
-							await sendMessage(BOT_TOKEN, chatId, response.text, response.replyMarkup, response.parse_mode);
-						}
-						break;
-					}
-					case data.startsWith('servers_delete_execute_'): {
-						const serverId = data.replace('servers_delete_execute_', '');
-						const response = await handleServersDeleteExecute({ db: env.DB, serverId });
-						await sendMessage(BOT_TOKEN, chatId, response.text, response.replyMarkup, response.parse_mode);
-						break;
-					}
-					case data === INLINE_KEYS.SERVERS_ADD_CANCEL: {
-						await cancelServerAddFlow(env.DB, user.id);
-						const { replyMarkup } = await handleServers();
-						await sendMessage(BOT_TOKEN, chatId, 'Добавление сервера отменено.', replyMarkup);
-						break;
-					}
-					case data === INLINE_KEYS.METRICS: {
-						const { text, replyMarkup } = await handleMetrics();
-						await sendMessage(BOT_TOKEN, chatId, text, replyMarkup);
-						break;
-					}
-					case data === INLINE_KEYS.ALERTS: {
-						const { text, replyMarkup } = await handleAlerts();
-						await sendMessage(BOT_TOKEN, chatId, text, replyMarkup);
-						break;
-					}
-					case data === INLINE_KEYS.ANALYTICS: {
-						const { text, replyMarkup } = await handleAnalytics();
-						await sendMessage(BOT_TOKEN, chatId, text, replyMarkup);
-						break;
-					}
-					case data === INLINE_KEYS.SETTINGS: {
-						const { text, replyMarkup } = await handleSettings();
-						await sendMessage(BOT_TOKEN, chatId, text, replyMarkup);
-						break;
-					}
-					case data === INLINE_KEYS.HELP: {
-						const { text, replyMarkup } = await handleHelp();
-						await sendMessage(BOT_TOKEN, chatId, text, replyMarkup);
-						break;
-					}
-					case data === INLINE_KEYS.BACK_TO_MENU: {
-						await sendMainMenu(BOT_TOKEN, chatId);
-						break;
-					}
-					default:
-						if (!data.startsWith('servers_delete_')) {
-							await sendMessage(BOT_TOKEN, chatId, 'Неизвестная команда');
-						}
-				}
-			}
-
-			return new Response('OK', { status: 200 });
-		} catch (error) {
-			console.error('Error:', error);
-			return new Response('Error processing request', { status: 500 });
-		}
-	}
+    return new Response('Not found', { status: 404 });
+  }
 };
-
-async function sendMessage(token, chatId, text, replyMarkup, parse_mode) {
-	const url = `${TELEGRAM_API}${token}/sendMessage`;
-	const payload = {
-		chat_id: chatId,
-		text
-	};
-
-	if (replyMarkup) {
-		payload.reply_markup = replyMarkup;
-	}
-
-	if (parse_mode) {
-		payload.parse_mode = parse_mode;
-	}
-
-	await fetch(url, {
-		method: 'POST',
-		headers: {
-			'Content-Type': 'application/json'
-		},
-		body: JSON.stringify(payload)
-	});
-}
-
-async function sendMainMenu(token, chatId) {
-	await sendMessage(token, chatId, 'Выберите раздел меню:', {
-		inline_keyboard: [
-			[
-				{ text: '🖥 Серверы', callback_data: INLINE_KEYS.SERVERS },
-				{ text: '📊 Метрики', callback_data: INLINE_KEYS.METRICS }
-			],
-			[
-				{ text: '🔔 Алерты', callback_data: INLINE_KEYS.ALERTS },
-				{ text: '📈 Аналитика', callback_data: INLINE_KEYS.ANALYTICS }
-			],
-			[
-				{ text: '⚙️ Настройки', callback_data: INLINE_KEYS.SETTINGS },
-				{ text: '❓ Помощь', callback_data: INLINE_KEYS.HELP }
-			]
-		]
-	});
-}
-
-function isAllowedUser(user) {
-	return user?.id === ALLOWED_USER_ID;
-}
-
-async function upsertUser(db, user) {
-	if (!db || !user?.id) return;
-
-	const telegramId = user.id;
-	const username = user.username ?? null;
-	const firstName = user.first_name ?? null;
-	const now = Math.floor(Date.now() / 1000);
-
-	const existing = await db
-		.prepare('SELECT telegram_id FROM users WHERE telegram_id = ?')
-		.bind(telegramId)
-		.first();
-
-	if (existing) {
-		await db
-			.prepare('UPDATE users SET last_seen = ?, username = ?, first_name = ? WHERE telegram_id = ?')
-			.bind(now, username, firstName, telegramId)
-			.run();
-		return;
-	}
-
-	await db
-		.prepare('INSERT INTO users (telegram_id, username, first_name, created_at, last_seen) VALUES (?, ?, ?, ?, ?)')
-		.bind(telegramId, username, firstName, now, now)
-		.run();
-}
-
